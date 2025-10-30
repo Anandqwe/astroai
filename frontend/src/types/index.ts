@@ -35,6 +35,24 @@ export interface MarsPhotosResponse {
   photos: MarsPhoto[];
 }
 
+// Daily Mars image + weather response
+export interface MarsDailyResponse {
+  date: string;
+  source: 'perseverance' | 'curiosity' | 'images-api';
+  photo: MarsPhoto; // when source is images-api, some fields may be placeholders
+  weather: {
+    source: string;
+    sol?: string;
+    terrestrial_date?: string;
+    min_temp?: number | null;
+    max_temp?: number | null;
+    pressure?: number | null;
+    season?: string | null;
+    stale: boolean;
+    note?: string;
+  };
+}
+
 export interface AsteroidData {
   id: string;
   name: string;

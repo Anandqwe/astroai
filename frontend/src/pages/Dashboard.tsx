@@ -5,8 +5,8 @@ import Card from '../components/Card';
 import Loading from '../components/Loading';
 import FadeInWhenVisible from '../components/FadeInWhenVisible';
 import { ToggleSwitch, Tooltip, ProgressBar } from '../components/MicroInteractions';
-import { favoritesService } from '../services/api';
-import { APODData, MarsPhoto, AsteroidData } from '../types';
+import api, { favoritesService, nasaService } from '../services/api';
+import { APODData, MarsPhoto, AsteroidData, MarsDailyResponse } from '../types';
 
 // Mock data
 const MOCK_APOD: APODData = {
@@ -89,10 +89,13 @@ const Dashboard: React.FC = () => {
   const [apodData, setApodData] = useState<APODData | null>(null);
   const [marsPhotos, setMarsPhotos] = useState<MarsPhoto[]>([]);
   const [asteroids, setAsteroids] = useState<AsteroidData[]>([]);
+  const [marsDaily, setMarsDaily] = useState<MarsDailyResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'apod' | 'mars' | 'asteroids'>('apod');
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [dataLoadProgress, setDataLoadProgress] = useState<number>(0);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingLive, setLoadingLive] = useState<boolean>(false);
 
   useEffect(() => {
     // Load mock data instead of calling API
@@ -109,6 +112,55 @@ const Dashboard: React.FC = () => {
     };
     simulateLoad();
   }, []);
+
+  // Helpers to fetch live data
+  const loadMarsLive = async (useMock = false): Promise<void> => {
+    setLoadingLive(true);
+    setError(null);
+    try {
+      if (useMock) {
+        const res = await api.get<{ photos: MarsPhoto[] }>('/nasa/mars', { params: { rover: 'curiosity', mock: 1 } });
+        setMarsPhotos(res.data.photos || []);
+        setMarsDaily(null);
+      } else {
+        // Use the new daily endpoint: returns one photo + weather
+        const daily = await nasaService.getMarsDaily();
+        setMarsDaily(daily);
+        setMarsPhotos(daily.photo ? [daily.photo] : []);
+      }
+    } catch (e: any) {
+      console.error('Live Mars error, falling back to mock:', e);
+      // Automatic fallback to mock data if live fails
+      try {
+        const res = await api.get<{ photos: MarsPhoto[] }>('/nasa/mars', { params: { rover: 'curiosity', mock: 1 } });
+        setMarsPhotos(res.data.photos || []);
+        setMarsDaily(null);
+        setError('Live Mars API had an issue. Showing mock photos for now.');
+      } catch (mockErr: any) {
+        console.error('Mars mock fallback also failed:', mockErr);
+        setError('Could not load Mars photos. Please try again later.');
+      }
+    } finally {
+      setLoadingLive(false);
+    }
+  };
+
+  const loadAsteroidsLive = async (): Promise<void> => {
+    try {
+      setLoadingLive(true);
+      setError(null);
+      const today = new Date().toISOString().slice(0, 10);
+      const res = await nasaService.getAsteroids(today, today);
+      // Flatten near_earth_objects into a single array
+      const all: AsteroidData[] = Object.values(res.near_earth_objects || {}).flat();
+      setAsteroids(all);
+    } catch (e: any) {
+      console.error('Live Asteroids error:', e);
+      setError('Could not load asteroid data. Please retry.');
+    } finally {
+      setLoadingLive(false);
+    }
+  };
 
   const toggleFavorite = (item: any, type: string): void => {
     const favoriteData = {
@@ -302,8 +354,64 @@ const Dashboard: React.FC = () => {
               transition={{ duration: 0.5 }}
             >
               <FadeInWhenVisible>
-                <h2 className="text-3xl font-bold mb-8 text-white">Mars Rover Photos</h2>
+                <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
+                  <h2 className="text-3xl font-bold text-white m-0">Mars Rover Photos</h2>
+                  <div className="flex gap-2">
+                    <button
+                      className="px-4 py-2 rounded-lg bg-gradient-primary text-white disabled:opacity-60"
+                      onClick={() => loadMarsLive(false)}
+                      disabled={loadingLive}
+                    >
+                      {loadingLive ? 'Loading…' : 'Load Live'}
+                    </button>
+                    <button
+                      className="px-4 py-2 rounded-lg border border-primary/40 text-primary disabled:opacity-60"
+                      onClick={() => loadMarsLive(true)}
+                      disabled={loadingLive}
+                    >
+                      {loadingLive ? 'Loading…' : 'Use Mock'}
+                    </button>
+                  </div>
+                </div>
               </FadeInWhenVisible>
+              {error && (
+                <div className="mb-4 text-sm text-red-400">{error}</div>
+              )}
+              {marsDaily && (
+                <div className="mb-8 bg-dark-card/80 border border-primary/20 rounded-2xl p-6">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div>
+                      <h3 className="text-2xl font-bold text-white m-0">Daily Mars Image</h3>
+                      <p className="text-primary text-sm mt-1">{marsDaily.date} • Source: {marsDaily.source}</p>
+                    </div>
+                    {marsDaily.weather && (
+                      <div className="text-sm text-gray-300">
+                        <div className="font-semibold mb-1">Weather</div>
+                        <div className="flex gap-4 flex-wrap">
+                          {marsDaily.weather.terrestrial_date && (
+                            <span>Date: {marsDaily.weather.terrestrial_date}</span>
+                          )}
+                          {typeof marsDaily.weather.min_temp !== 'undefined' && marsDaily.weather.min_temp !== null && (
+                            <span>Min: {marsDaily.weather.min_temp}°C</span>
+                          )}
+                          {typeof marsDaily.weather.max_temp !== 'undefined' && marsDaily.weather.max_temp !== null && (
+                            <span>Max: {marsDaily.weather.max_temp}°C</span>
+                          )}
+                          {typeof marsDaily.weather.pressure !== 'undefined' && marsDaily.weather.pressure !== null && (
+                            <span>Pressure: {marsDaily.weather.pressure} Pa</span>
+                          )}
+                          {marsDaily.weather.season && (
+                            <span>Season: {marsDaily.weather.season}</span>
+                          )}
+                          {marsDaily.weather.stale && (
+                            <span className="text-yellow-400">(stale)</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                 {marsPhotos.map((photo, index) => (
                   <FadeInWhenVisible key={photo.id} delay={index * 0.1} direction="up">
@@ -336,8 +444,22 @@ const Dashboard: React.FC = () => {
               transition={{ duration: 0.5 }}
             >
               <FadeInWhenVisible>
-                <h2 className="text-3xl font-bold mb-8 text-white">Near-Earth Asteroids</h2>
+                <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
+                  <h2 className="text-3xl font-bold text-white m-0">Near-Earth Asteroids</h2>
+                  <div>
+                    <button
+                      className="px-4 py-2 rounded-lg bg-gradient-primary text-white disabled:opacity-60"
+                      onClick={loadAsteroidsLive}
+                      disabled={loadingLive}
+                    >
+                      {loadingLive ? 'Loading…' : 'Load Live'}
+                    </button>
+                  </div>
+                </div>
               </FadeInWhenVisible>
+              {error && (
+                <div className="mb-4 text-sm text-red-400">{error}</div>
+              )}
               <div className="grid gap-5">
                 {asteroids.map((asteroid, index) => (
                   <FadeInWhenVisible key={asteroid.id} delay={index * 0.15} direction="up">
