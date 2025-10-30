@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import {
   APODData,
   MarsPhotosResponse,
+  MarsDailyResponse,
   AsteroidsResponse,
   ChatResponse,
   PredictionRequest,
@@ -67,6 +68,16 @@ export const nasaService = {
       const response = await api.get<MarsPhotosResponse>('/nasa/mars', {
         params: { rover, sol },
       });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  // Get Daily Mars image (single) with weather
+  getMarsDaily: async (): Promise<MarsDailyResponse> => {
+    try {
+      const response = await api.get<MarsDailyResponse>('/nasa/mars/daily');
       return response.data;
     } catch (error) {
       throw error;
