@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { FaRocket, FaBars, FaTimes } from 'react-icons/fa';
-import { motion, useScroll, useTransform } from 'framer-motion';
+import { motion, useScroll, useTransform, AnimatePresence } from 'framer-motion';
+import { favoritesService } from '../services/api';
+import { getPreloadForPath } from '../utils/preload';
 
 const Navbar: React.FC = () => {
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [scrolled, setScrolled] = useState<boolean>(false);
+  const [favoritesCount, setFavoritesCount] = useState<number>(0);
   const location = useLocation();
   const { scrollY } = useScroll();
   const navOpacity = useTransform(scrollY, [0, 100], [0.7, 0.95]);
@@ -19,6 +22,16 @@ const Navbar: React.FC = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  // Update favorites count when location changes
+  useEffect(() => {
+    const updateFavoritesCount = () => {
+      const favorites = favoritesService.getFavorites();
+      setFavoritesCount(favorites.length);
+    };
+
+    updateFavoritesCount();
+  }, [location]);
+
   const toggleMenu = (): void => {
     setIsOpen(!isOpen);
   };
@@ -31,8 +44,8 @@ const Navbar: React.FC = () => {
     <motion.nav
       className={`fixed top-0 left-0 w-full z-50 py-4 transition-all duration-300 ${
         scrolled
-          ? 'bg-dark-darker/80 backdrop-blur-xl border-b border-primary/30 shadow-2xl shadow-primary/10'
-          : 'bg-dark-darker/60 backdrop-blur-lg border-b border-primary/20'
+          ? 'backdrop-blur-xl border-b border-primary/30 shadow-2xl shadow-primary/10'
+          : 'backdrop-blur-lg border-b border-primary/20'
       }`}
       style={{ opacity: navOpacity }}
     >
@@ -60,8 +73,58 @@ const Navbar: React.FC = () => {
             </motion.span>
           </Link>
 
+          {/* Desktop Navigation */}
+          <ul className="hidden md:flex md:flex-row md:gap-10 md:items-center list-none">
+            {['/', '/dashboard', '/favorites', '/prediction', '/chat', '/about', '/settings'].map((path, index) => {
+              const labels = ['Home', 'Dashboard', 'Favorites', 'Predict', 'Ask Astro', 'About', 'Settings'];
+              return (
+                <motion.li
+                  key={path}
+                  whileHover={{ scale: 1.05 }}
+                  transition={{ type: "spring", stiffness: 400 }}
+                >
+                  <Link 
+                    to={path}
+                    className={[
+                      isActive(path),
+                      'text-lg font-medium relative py-2 transition-all duration-300',
+                      'hover:text-white block group',
+                      'border-b-2 border-transparent hover:border-primary/70'
+                    ].join(' ')}
+                    onMouseEnter={() => {
+                      const preload = getPreloadForPath(path);
+                      if (preload) preload();
+                    }}
+                  >
+                    <motion.span
+                      className="inline-flex items-center gap-2"
+                      whileHover={{
+                        textShadow: '0 0 10px rgba(124, 58, 237, 0.8)',
+                      }}
+                    >
+                      {labels[index]}
+                      {/* Favorites Count Badge */}
+                      {path === '/favorites' && favoritesCount > 0 && (
+                        <motion.span
+                          className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 bg-gradient-primary text-white text-xs font-bold rounded-full"
+                          initial={{ scale: 0 }}
+                          animate={{ scale: 1 }}
+                          transition={{ type: 'spring', stiffness: 500, damping: 15 }}
+                          whileHover={{ scale: 1.1 }}
+                        >
+                          {favoritesCount}
+                        </motion.span>
+                      )}
+                    </motion.span>
+                  </Link>
+                </motion.li>
+              );
+            })}
+          </ul>
+
+          {/* Mobile Menu Button */}
           <motion.button 
-            className="md:hidden bg-transparent border-none text-white text-2xl cursor-pointer transition-colors duration-300 hover:text-primary"
+            className="md:hidden bg-transparent border-none text-white text-2xl cursor-pointer transition-colors duration-300 hover:text-primary z-50"
             onClick={toggleMenu} 
             aria-label="Toggle menu"
             whileHover={{ scale: 1.1, rotate: 90 }}
@@ -71,48 +134,73 @@ const Navbar: React.FC = () => {
             {isOpen ? <FaTimes /> : <FaBars />}
           </motion.button>
 
-          <ul className={`
-            md:flex md:flex-row md:gap-10 md:items-center
-            ${isOpen ? 'flex' : 'hidden'}
-            flex-col gap-0 list-none
-            md:static md:w-auto md:bg-transparent md:p-0 md:border-0
-            fixed top-[70px] left-0 w-full bg-dark-darker/95 backdrop-blur-xl border-b border-primary/20 py-5
-            transition-transform duration-300
-          `}>
-            {['/', '/dashboard', '/chat', '/about'].map((path, index) => {
-              const labels = ['Home', 'Dashboard', 'Ask Astro', 'About'];
-              return (
-                <motion.li
-                  key={path}
-                  className="w-full md:w-auto text-center py-4 md:py-0 border-b md:border-0 border-primary/10"
-                  whileHover={{ scale: 1.05 }}
-                  transition={{ type: "spring", stiffness: 400 }}
+          {/* Mobile Navigation Drawer */}
+          <AnimatePresence>
+            {isOpen && (
+              <>
+                {/* Backdrop */}
+                <motion.div
+                  className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setIsOpen(false)}
+                />
+                {/* Drawer */}
+                <motion.ul
+                  className="fixed top-[70px] left-0 w-64 h-[calc(100vh-70px)] bg-dark-darker/95 backdrop-blur-xl border-r border-primary/20 py-5 z-50 flex flex-col gap-0 list-none md:hidden overflow-y-auto"
+                  initial={{ x: -280 }}
+                  animate={{ x: 0 }}
+                  exit={{ x: -280 }}
+                  transition={{ duration: 0.3, ease: 'easeInOut' }}
                 >
-                  <Link 
-                    to={path}
-                    className={`
-                      ${isActive(path)}
-                      text-lg font-medium relative py-2 transition-all duration-300
-                      hover:text-white block w-full group
-                      after:content-[''] after:absolute after:bottom-0 after:left-0 after:w-0 after:h-0.5 
-                      after:bg-gradient-primary after:transition-all after:duration-300
-                      hover:after:w-full hover:after:shadow-[0_0_15px_rgba(124,58,237,0.8)]
-                      ${location.pathname === path ? 'after:w-full after:shadow-[0_0_15px_rgba(124,58,237,0.8)]' : ''}
-                    `}
-                    onClick={() => setIsOpen(false)}
-                  >
-                    <motion.span
-                      whileHover={{
-                        textShadow: '0 0 10px rgba(124, 58, 237, 0.8)',
-                      }}
-                    >
-                      {labels[index]}
-                    </motion.span>
-                  </Link>
-                </motion.li>
-              );
-            })}
-          </ul>
+                  {['/', '/dashboard', '/favorites', '/prediction', '/chat', '/about', '/settings'].map((path, index) => {
+                    const labels = ['Home', 'Dashboard', 'Favorites', 'Predict', 'Ask Astro', 'About', 'Settings'];
+                    return (
+                      <motion.li
+                        key={path}
+                        className="w-full text-center py-4 border-b border-primary/10"
+                        whileHover={{ scale: 1.05, x: 10 }}
+                        transition={{ type: "spring", stiffness: 400 }}
+                      >
+                        <Link 
+                          to={path}
+                          className={[
+                            isActive(path),
+                            'text-lg font-medium relative py-2 transition-all duration-300',
+                            'hover:text-white block w-full group',
+                            'border-b-2 border-transparent hover:border-primary/70'
+                          ].join(' ')}
+                          onClick={() => setIsOpen(false)}
+                        >
+                          <motion.span
+                            className="inline-flex items-center gap-2"
+                            whileHover={{
+                              textShadow: '0 0 10px rgba(124, 58, 237, 0.8)',
+                            }}
+                          >
+                            {labels[index]}
+                            {/* Favorites Count Badge */}
+                            {path === '/favorites' && favoritesCount > 0 && (
+                              <motion.span
+                                className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 bg-gradient-primary text-white text-xs font-bold rounded-full"
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                transition={{ type: 'spring', stiffness: 500, damping: 15 }}
+                                whileHover={{ scale: 1.1 }}
+                              >
+                                {favoritesCount}
+                              </motion.span>
+                            )}
+                          </motion.span>
+                        </Link>
+                      </motion.li>
+                    );
+                  })}
+                </motion.ul>
+              </>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </motion.nav>

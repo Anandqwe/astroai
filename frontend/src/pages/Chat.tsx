@@ -2,15 +2,45 @@ import React, { useState, useRef, useEffect } from 'react';
 import { FaPaperPlane, FaRobot, FaTrash } from 'react-icons/fa';
 import { motion, AnimatePresence, useAnimation } from 'framer-motion';
 import ChatMessage from '../components/ChatMessage';
+import SuggestedQuestions from '../components/SuggestedQuestions';
+import ChatHistory from '../components/ChatHistory';
 import { AnimatedButton, AnimatedInput, Tooltip } from '../components/MicroInteractions';
 import { aiService } from '../services/api';
 import { ChatMessage as ChatMessageType } from '../types';
+import { showToast } from '../utils/toast';
+import { exportService } from '../utils/export';
+import { FaDownload } from 'react-icons/fa';
+
+const CHAT_STORAGE_KEY = 'astroai_chat_history';
+
+const loadChatHistory = (): ChatMessageType[] => {
+  try {
+    const stored = localStorage.getItem(CHAT_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    return parsed.map((msg: any) => ({
+      ...msg,
+      timestamp: new Date(msg.timestamp),
+    }));
+  } catch {
+    return [];
+  }
+};
+
+const saveChatHistory = (messages: ChatMessageType[]): void => {
+  try {
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
+  } catch (err) {
+    console.error('Failed to save chat history:', err);
+  }
+};
 
 const Chat: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [inputMessage, setInputMessage] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [particles, setParticles] = useState<Array<{ id: number; x: number; y: number }>>([]);
+  const [historyOpen, setHistoryOpen] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputControls = useAnimation();
 
@@ -22,15 +52,22 @@ const Chat: React.FC = () => {
     }
   };
 
+  // Save chat history when messages change (for backward compatibility)
   useEffect(() => {
-    // Only auto-scroll when new messages are added
     if (messages.length > 0) {
+      saveChatHistory(messages);
       scrollToBottom();
     }
   }, [messages]);
 
-  const handleSendMessage = async (): Promise<void> => {
-    if (!inputMessage.trim() || isLoading) return;
+  const handleLoadConversation = (loadedMessages: ChatMessageType[]) => {
+    setMessages(loadedMessages);
+    setHistoryOpen(false); // Close sidebar on mobile after loading
+  };
+
+  const handleSendMessage = async (messageOverride?: string): Promise<void> => {
+    const messageToSend = messageOverride || inputMessage;
+    if (!messageToSend.trim() || isLoading) return;
 
     // Particle burst animation
     const buttonRect = document.querySelector('.send-button')?.getBoundingClientRect();
@@ -50,19 +87,23 @@ const Chat: React.FC = () => {
       transition: { duration: 0.3 }
     });
 
-    const userMessage: ChatMessageType = {
-      id: Date.now().toString(),
-      message: inputMessage,
-      sender: 'user',
-      timestamp: new Date(),
-    };
+    // Only add user message if not regenerating (regenerate already has user message in chat)
+    if (!messageOverride) {
+      const userMessage: ChatMessageType = {
+        id: Date.now().toString(),
+        message: messageToSend,
+        sender: 'user',
+        timestamp: new Date(),
+      };
 
-    setMessages(prev => [...prev, userMessage]);
-    setInputMessage('');
+      setMessages(prev => [...prev, userMessage]);
+      setInputMessage('');
+    }
+    
     setIsLoading(true);
 
     try {
-      const response = await aiService.chat(inputMessage);
+      const response = await aiService.chat(messageToSend);
       
       const aiMessage: ChatMessageType = {
         id: (Date.now() + 1).toString(),
@@ -72,17 +113,34 @@ const Chat: React.FC = () => {
       };
 
       setMessages(prev => [...prev, aiMessage]);
-    } catch (error) {
+      showToast.success('Response received from Astro AI! 🤖');
+    } catch (error: any) {
       console.error('Error sending message:', error);
+      
+      // Check for API key error
+      const isApiKeyError = error?.response?.status === 403 || 
+                           error?.response?.data?.code === 'API_KEY_ERROR' ||
+                           error?.response?.data?.error?.toLowerCase().includes('api key');
+      
+      const errorDetails = error?.response?.data?.details || error?.response?.data?.error || '';
+      const userFriendlyMessage = isApiKeyError 
+        ? '🔑 API Key Issue: Please update your GEMINI_API_KEY in the server .env file. Generate a new key at https://aistudio.google.com/app/apikey'
+        : error?.response?.data?.error || 'Sorry, I\'m having trouble connecting right now. Please try again later.';
       
       const errorMessage: ChatMessageType = {
         id: (Date.now() + 1).toString(),
-        message: 'Sorry, I\'m having trouble connecting right now. Please try again later.',
+        message: userFriendlyMessage,
         sender: 'ai',
         timestamp: new Date(),
       };
 
       setMessages(prev => [...prev, errorMessage]);
+      
+      if (isApiKeyError) {
+        showToast.error('API Key Error - Check server configuration');
+      } else {
+        showToast.error('Failed to connect to AI. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -90,10 +148,36 @@ const Chat: React.FC = () => {
 
   const clearChat = (): void => {
     setMessages([]);
+    localStorage.removeItem(CHAT_STORAGE_KEY);
+    showToast.info('Chat history cleared');
+  };
+
+  const exportChat = (): void => {
+    if (messages.length === 0) {
+      showToast.info('No chat history to export');
+      return;
+    }
+    try {
+      exportService.exportChatHistory(messages);
+      showToast.success('Chat history exported!');
+    } catch (err) {
+      showToast.error('Failed to export chat history');
+    }
   };
 
   return (
     <div className="min-h-[calc(100vh-180px)] py-10 px-5 relative overflow-hidden">
+      {/* Chat History Sidebar */}
+      <ChatHistory
+        currentMessages={messages}
+        onLoadConversation={handleLoadConversation}
+        onClearCurrent={() => {
+          setMessages([]);
+          localStorage.removeItem(CHAT_STORAGE_KEY);
+        }}
+        isOpen={historyOpen}
+        onToggle={() => setHistoryOpen(!historyOpen)}
+      />
       {/* Animated gradient background */}
       <motion.div
         className="absolute inset-0 opacity-30"
@@ -127,7 +211,7 @@ const Chat: React.FC = () => {
         ))}
       </AnimatePresence>
 
-      <div className="max-w-5xl mx-auto relative z-10">
+      <div className={`max-w-5xl mx-auto relative z-10 transition-all duration-300 ${historyOpen ? 'lg:ml-64' : ''}`}>
         <motion.div
           className="text-center mb-12"
           initial={{ opacity: 0, y: -20 }}
@@ -178,9 +262,17 @@ const Chat: React.FC = () => {
                   <FaRobot className="text-5xl text-primary/30 mb-4" />
                 </motion.div>
                 <p className="text-gray-400 text-lg mb-2">Start a conversation!</p>
-                <p className="text-gray-500 text-sm">
+                <p className="text-gray-500 text-sm mb-6">
                   Ask me about planets, stars, asteroids, or anything space-related
                 </p>
+                <SuggestedQuestions onQuestionClick={(question) => {
+                  setInputMessage(question);
+                  // Auto-focus on input after setting question
+                  setTimeout(() => {
+                    const input = document.querySelector('input[type="text"]') as HTMLInputElement;
+                    input?.focus();
+                  }, 100);
+                }} />
               </motion.div>
             ) : (
               <>
@@ -202,6 +294,17 @@ const Chat: React.FC = () => {
                         message={msg.message}
                         sender={msg.sender}
                         timestamp={msg.timestamp}
+                        onRegenerate={msg.sender === 'ai' && index > 0 ? () => {
+                          // Find the user message that preceded this AI response
+                          const userMessage = messages[index - 1];
+                          if (userMessage && userMessage.sender === 'user') {
+                            // Remove the current AI response and regenerate
+                            const newMessages = messages.slice(0, index);
+                            setMessages(newMessages);
+                            // Regenerate response
+                            handleSendMessage(userMessage.message);
+                          }
+                        } : undefined}
                       />
                     </motion.div>
                   ))}
@@ -253,17 +356,30 @@ const Chat: React.FC = () => {
               <div className="flex-1">
                 <AnimatedInput
                   type="textarea"
-                  placeholder="Ask me about space..."
+                  placeholder="Ask me about space... (Press Enter to send, Shift+Enter for new line)"
                   value={inputMessage}
                   onChange={setInputMessage}
                   disabled={isLoading}
                   className="w-full"
+                  onKeyDown={(e: React.KeyboardEvent) => {
+                    // Send on Enter, new line on Shift+Enter
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      if (!isLoading && inputMessage.trim()) {
+                        handleSendMessage();
+                      }
+                    }
+                  }}
                 />
               </div>
               <div className="flex gap-2 flex-shrink-0">
-                <Tooltip content="Send message" position="top">
+                <Tooltip content="Send message (Enter)" position="top">
                   <AnimatedButton
-                    onClick={handleSendMessage}
+                    onClick={() => {
+                      if (!isLoading && inputMessage.trim()) {
+                        handleSendMessage();
+                      }
+                    }}
                     disabled={isLoading || !inputMessage.trim()}
                     variant="primary"
                     size="sm"
@@ -273,15 +389,26 @@ const Chat: React.FC = () => {
                   </AnimatedButton>
                 </Tooltip>
                 {messages.length > 0 && (
-                  <Tooltip content="Clear chat" position="top">
-                    <AnimatedButton
-                      onClick={clearChat}
-                      variant="outline"
-                      size="sm"
-                    >
-                      <FaTrash />
-                    </AnimatedButton>
-                  </Tooltip>
+                  <>
+                    <Tooltip content="Export chat history" position="top">
+                      <AnimatedButton
+                        onClick={exportChat}
+                        variant="outline"
+                        size="sm"
+                      >
+                        <FaDownload />
+                      </AnimatedButton>
+                    </Tooltip>
+                    <Tooltip content="Clear chat" position="top">
+                      <AnimatedButton
+                        onClick={clearChat}
+                        variant="outline"
+                        size="sm"
+                      >
+                        <FaTrash />
+                      </AnimatedButton>
+                    </Tooltip>
+                  </>
                 )}
               </div>
             </div>

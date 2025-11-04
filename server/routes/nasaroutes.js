@@ -15,25 +15,54 @@ async function getJson(url, params = {}) {
 
 // GET /api/nasa/apod -> Astronomy Picture of the Day
 router.get('/apod', async (req, res) => {
-  try {
-    const apiKey = process.env.NASA_API_KEY || 'DEMO_KEY';    // fallback demo key
-    const { date } = req.query;                 // optional: ?date=YYYY-MM-DD
+  const apiKey = process.env.NASA_API_KEY || 'DEMO_KEY';    // fallback demo key
+  const { date } = req.query;                 // optional: ?date=YYYY-MM-DD
 
-    const { data } = await axios.get('https://api.nasa.gov/planetary/apod', {
-      params: {
-        api_key: apiKey,
-        ...(date ? { date } : {}),              // add date param only if provided
-      },
-    });
+  // Retry logic for timeout issues
+  const maxRetries = 2;
+  let lastError = null;
 
-    res.json(data);                             // send NASA response to client
-  } catch (err) {
-    console.error('APOD error:', err.response?.data || err.message);
-    res.status(err.response?.status || 500).json({
-      error: 'Failed to fetch APOD',
-      details: err.response?.data || err.message,
-    });
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const { data } = await axios.get('https://api.nasa.gov/planetary/apod', {
+        params: {
+          api_key: apiKey,
+          ...(date ? { date } : {}),              // add date param only if provided
+        },
+        timeout: 10000, // 10 second timeout
+        headers: { 
+          'Accept': 'application/json',
+          'User-Agent': 'astroai-server/1.0'
+        },
+      });
+
+      return res.json(data);                             // send NASA response to client
+    } catch (err) {
+      lastError = err;
+      const isTimeout = err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT' || err.response?.status === 504;
+      
+      if (isTimeout && attempt < maxRetries) {
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 1000));
+        continue;
+      }
+      
+      // If not a timeout or last attempt, break and return error
+      if (!isTimeout) break;
+    }
   }
+
+  // Handle final error
+  const statusCode = lastError?.response?.status || (lastError?.code === 'ECONNABORTED' || lastError?.code === 'ETIMEDOUT' ? 504 : 500);
+  const errorMessage = lastError?.response?.data || lastError?.message || 'Unknown error';
+  
+  console.error('APOD error:', errorMessage);
+  
+  res.status(statusCode).json({
+    error: statusCode === 504 ? 'NASA API timeout - Please try again later' : 'Failed to fetch APOD',
+    details: errorMessage,
+    code: statusCode === 504 ? 'TIMEOUT' : 'API_ERROR'
+  });
 });
 
 // GET /api/nasa/mars -> Mars Rover Photos

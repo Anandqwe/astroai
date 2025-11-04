@@ -40,8 +40,23 @@ router.post('/chat', async (req, res) => {
 
     return res.json({ response: text });
   } catch (err) {
-    console.error('Gemini chat error:', err?.response?.data || err?.message || err);
-    return res.status(500).json({ error: 'Failed to get AI response', details: err?.message });
+    const errorMessage = err?.message || 'Unknown error';
+    const isApiKeyError = errorMessage.includes('403') || errorMessage.includes('API key') || errorMessage.includes('leaked');
+    
+    console.error('Gemini chat error:', err?.response?.data || errorMessage);
+    
+    if (isApiKeyError) {
+      return res.status(403).json({ 
+        error: 'API key issue detected. Please check your GEMINI_API_KEY in .env file.',
+        details: 'The API key may be invalid, expired, or flagged. Generate a new key at https://aistudio.google.com/app/apikey',
+        code: 'API_KEY_ERROR'
+      });
+    }
+    
+    return res.status(500).json({ 
+      error: 'Failed to get AI response', 
+      details: errorMessage 
+    });
   }
 });
 
@@ -70,7 +85,22 @@ router.get('/chat', async (req, res) => {
     if (!text) return res.status(502).json({ error: 'Empty response from Gemini' });
     return res.json({ response: text });
   } catch (err) {
-    console.error('Gemini chat (GET) error:', err?.response?.data || err?.message || err);
-    return res.status(500).json({ error: 'Failed to get AI response', details: err?.message });
+    const errorMessage = err?.message || 'Unknown error';
+    const isApiKeyError = errorMessage.includes('403') || errorMessage.includes('API key') || errorMessage.includes('leaked');
+    
+    console.error('Gemini chat (GET) error:', err?.response?.data || errorMessage);
+    
+    if (isApiKeyError) {
+      return res.status(403).json({ 
+        error: 'API key issue detected. Please check your GEMINI_API_KEY in .env file.',
+        details: 'The API key may be invalid, expired, or flagged. Generate a new key at https://aistudio.google.com/app/apikey',
+        code: 'API_KEY_ERROR'
+      });
+    }
+    
+    return res.status(500).json({ 
+      error: 'Failed to get AI response', 
+      details: errorMessage 
+    });
   }
 });

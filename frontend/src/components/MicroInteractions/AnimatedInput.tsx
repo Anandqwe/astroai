@@ -6,6 +6,7 @@ interface AnimatedInputProps {
   placeholder?: string;
   value?: string;
   onChange?: (value: string) => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
   label?: string;
   error?: string;
   disabled?: boolean;
@@ -17,6 +18,7 @@ const AnimatedInput: React.FC<AnimatedInputProps> = ({
   placeholder,
   value,
   onChange,
+  onKeyDown,
   label,
   error,
   disabled = false,
@@ -56,6 +58,7 @@ const AnimatedInput: React.FC<AnimatedInputProps> = ({
           placeholder={placeholder}
           value={value}
           onChange={handleChange}
+          onKeyDown={onKeyDown}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           disabled={disabled}
